@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace jasonw4331\libpmquery;
 
+use function assert;
 use function explode;
 use function fclose;
 use function fread;
@@ -19,6 +20,7 @@ use function stream_socket_client;
 use function stream_socket_get_name;
 use function stream_socket_server;
 use function stream_socket_shutdown;
+use function strlen;
 use function substr;
 use function time;
 use const E_WARNING;
@@ -70,76 +72,44 @@ class PMQuery{
 		}
 
 		stream_set_timeout($socket, $timeout);
-		stream_set_blocking($socket, false);
+		stream_set_blocking($socket, true);
 
 		// hardcoded magic https://github.com/facebookarchive/RakNet/blob/1a169895a900c9fc4841c556e16514182b75faf8/Source/RakPeer.cpp#L135
 		$OFFLINE_MESSAGE_DATA_ID = pack('c*', 0x00, 0xFF, 0xFF, 0x00, 0xFE, 0xFE, 0xFE, 0xFE, 0xFD, 0xFD, 0xFD, 0xFD, 0x12, 0x34, 0x56, 0x78);
 		$command = pack('cQ', 0x01, time()); // DefaultMessageIDTypes::ID_UNCONNECTED_PING + 64bit current time
 		$command .= $OFFLINE_MESSAGE_DATA_ID;
 		$command .= pack('Q', 2); // 64bit guid
+		$length = strlen($command);
 
-		$read = $except = [];
-		$write = [$socket];
-		$state = "select";
-		$data = false;
-		$error = null;
-		while($state !== null){
-			switch($state){
-				case "select":
-					$r = $read;
-					$w = $write;
-					if($ipc !== null){
-						$r[] = $ipc;
-					}
-					$result = stream_select($r, $w, $except, $timeout);
-					if($result === false){
-						$error = "select() call failed";
-						$state = "shutdown";
-					}elseif($result === 0){
-						$error = "select() timed out";
-						$state = "shutdown";
-					}elseif(in_array($ipc, $r, true)){
-						$error = "Request interrupted";
-						$state = "shutdown";
-					}elseif(in_array($socket, $r, true)){
-						$state = "read";
-					}elseif(in_array($socket, $w, true)){
-						$state = "write";
-					}
-					break;
-				case "write":
-					$written = fwrite($socket, $command);
-					if($written === false){
-						$error = "Failed to write on socket";
-						$state = "shutdown";
-						break;
-					}
-					$command = substr($command, $written);
-					if($command === ""){
-						stream_set_blocking($socket, true);
-						$read = [$socket];
-						$write = [];
-					}
-					$state = "select";
-					break;
-				case "read":
-					$data = fread($socket, 4096);
-					$state = "shutdown";
-					break;
-				case "shutdown":
-					fclose($socket);
-					if($ipc !== null){
-						stream_socket_shutdown($ipc, STREAM_SHUT_RDWR);
-						fclose($ipc);
-					}
-					$state = null;
-					break;
-			}
+		if($length !== fwrite($socket, $command, $length)){
+			throw new PmQueryException("Failed to write on socket.", E_WARNING);
 		}
 
-		if($error !== null){
-			throw new PmQueryException($error, E_WARNING);
+		stream_set_blocking($socket, false);
+		$read = [$socket];
+		$write = $except = [];
+		if($ipc !== null){
+			$read[] = $ipc;
 		}
+		$result = stream_select($read, $write, $except, $timeout);
+		if($result === false){
+			throw new PmQueryException("select() call failed", E_WARNING);
+		}
+		if($result === 0){
+			throw new PmQueryException("select() timed out", E_WARNING);
+		}
+		if(in_array($ipc, $read, true)){
+			throw new PmQueryException("Request interrupted", E_WARNING);
+		}
+
+		assert(in_array($socket, $read, true));
+		$data = fread($socket, 4096);
+		fclose($socket);
+		if($ipc !== null){
+			stream_socket_shutdown($ipc, STREAM_SHUT_RDWR);
+			fclose($ipc);
+		}
+
 		if($data === false || $data === ''){
 			throw new PmQueryException("Server failed to respond", E_WARNING);
 		}
