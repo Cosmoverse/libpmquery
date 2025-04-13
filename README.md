@@ -16,7 +16,6 @@ $plugin->getScheduler()->scheduleDelayedTask(new ClosureTask(function() use($ipc
 	// interrupt ongoing query from main thread.
 	stream_socket_shutdown($ipc_socket, STREAM_SHUT_RDWR);
 	fclose($ipc_socket);
-	unset($this->interruptible);
 }), 20 * 5);
 ```
 <hr/>
