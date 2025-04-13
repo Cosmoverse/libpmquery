@@ -56,7 +56,6 @@ class PMQuery{
 			if($ipc === false){
 				throw new PmQueryException($errstr, $errno);
 			}
-			$read[] = $ipc;
 		}else{
 			$ipc = null;
 		}
